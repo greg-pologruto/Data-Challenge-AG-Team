@@ -1,2 +1,0 @@
-test_rows,test_failures,failure_rate_pct,roc_auc,pr_auc,pr_auc_baseline,flagged_share,recall_flagged,precision_flagged,best_nrounds
-51447,320,0.6219993391257023,0.9955678078608172,0.5579094123229774,0.0062199933912570225,0.05,0.996875,0.12397979012825495,41

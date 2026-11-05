@@ -1,0 +1,160 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{microtype}
+\usepackage{xurl}
+\newcommand{\code}[1]{\texttt{\nolinkurl{#1}}}
+
+% Formatting & Input
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=1in]{geometry}
+\usepackage{enumitem}
+
+% Math & Symbols
+\usepackage{amsmath, amssymb, amsfonts, bm}
+
+% Figures & Tables
+\usepackage{graphicx}
+\graphicspath{{../graphs/}{graphs/}{./graphs/}}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{xcolor}
+
+% Hyperlinks
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+\title{\textbf{Predicting Bank Insolvency and Systemic Distress: Model Architecture, Mathematical Formulations, and Empirical Findings}}
+\author{\textbf{Data Analytics Club - AG Team}}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{quote}
+	\emph{RQ: Can quarterly financial ratios predict failures within four quarters, and do local economic conditions add predictive power beyond the bank's own financials?}
+\end{quote}
+\begin{itemize}[itemindent=4em]
+	\item Target: \code{fails_within_4q}
+	\item Feature groups compared: bank-only (capital, asset quality, funding, profitability), then added county unemployment and disasters, then added national rates
+	\item Why: failures were concentrated in 2009-2012; this timeline generates two distinct classes, starting our training data in 2007
+\end{itemize}
+
+\section{Introduction and Problem Formulation}
+
+Predicting bank distress requires identifying early-warning signals in balance sheet ratios before insolvency occurs. We formalize this task as a binary classification problem on panel data of commercial banks over quarterly periods $t \in \{1, 2, \dots, T\}$.
+
+Let $X_{i,t} \in \mathbb{R}^d$ represent the vector of $d$ financial features for bank $i$ observed at quarter $t$. The target label $Y_{i,t+4} \in \{0, 1\}$ indicates whether bank $i$ fails or enters regulatory receivership within 4 quarters following quarter $t$:
+\begin{equation}
+Y_{i,t+4} = \begin{cases} 
+1 & \text{if bank } i \text{ fails within quarters } (t, t+4] \\
+0 & \text{if bank } i \text{ survives beyond quarter } t+4
+\end{cases}
+\end{equation}
+
+Because bank failures represent rare economic events, the dataset exhibits severe class imbalance ($\mathbb{P}(Y = 1) \ll 0.05$). The primary analytical objective is to maximize out-of-sample precision-recall curves while preserving interpretability for financial supervisory applications.
+
+\section{Exploratory Data Analysis and Key Findings}
+
+Initial visual inspection of the quarterly data yields critical insights regarding feature selection, extreme value distributions, and collinearity structures.
+
+\subsection{Univariate Distribution Analysis}
+
+Analysis of univariate density distributions reveals distinct separation profiles between surviving institutions ($Y=0$) and failing institutions ($Y=1$):
+
+\begin{enumerate}
+    \item \textbf{Capital Adequacy Metrics:} Metrics such as \code{total_risk_based_capital_ratio}, \code{leverage_ratio}, and \code{equity_to_assets_pct} exhibit strong left-tail shifts for failing institutions. While surviving institutions center around healthy risk-based capital ratios ($\ge 12\%$), failing institutions cluster below regulatory thresholds ($<6\%$).
+    \item \textbf{Asset Quality and Sector Concentration:} The distribution for \code{cre_concentration_pct} (Commercial Real Estate loans as a percentage of total capital) exhibits a long right tail among distressed banks, frequently exceeding $500\%$ to $1000\%$. Concurrently, \code{noncurrent_rate_pct} shows massive right-skewness for failing banks.
+    \item \textbf{Profitability Dynamics:} Annualized Return on Assets (\code{roa_annualized_pct}) for distressed institutions exhibits sharp negative density, reflecting severe earnings erosion prior to insolvency.
+\end{enumerate}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.5\textwidth]{04_densities_top_features.png}
+    \caption{An example image}
+    \label{fig:example}
+\end{figure}
+
+
+XGBoost constructs an additive ensemble of $K$ decision trees $\hat{y}_i = \sum_{k=1}^K f_k(x_i), \, f_k \in \mathcal{F}$. At step $t$, the objective function to minimize is:
+\begin{equation}
+\mathcal{O}^{(t)} = \sum_{i=1}^n l\left(y_i, \hat{y}_i^{(t-1)} + f_t(x_i)\right) + \Omega(f_t)
+\end{equation}
+where the regularization term $\Omega(f)$ penalizes model complexity:
+\begin{equation}
+\Omega(f_t) = \gamma T + \frac{1}{2} \lambda \sum_{j=1}^T w_j^2
+\end{equation}
+Here $T$ represents the number of leaves and $w_j$ denotes the leaf weights. Taking a second-order Taylor expansion of the loss function around $\hat{y}_i^{(t-1)}$ yields:
+\begin{equation}
+\mathcal{O}^{(t)} \approx \sum_{i=1}^n \left[ l(y_i, \hat{y}_i^{(t-1)}) + g_i f_t(x_i) + \frac{1}{2} h_i f_t^2(x_i) \right] + \gamma T + \frac{1}{2} \lambda \sum_{j=1}^T w_j^2
+\end{equation}
+where the first and second-order gradient statistics are defined as:
+\begin{equation}
+g_i = \frac{\partial l(y_i, \hat{y}^{(t-1)})}{\partial \hat{y}^{(t-1)}}, \quad h_i = \frac{\partial^2 l(y_i, \hat{y}^{(t-1)})}{\partial (\hat{y}^{(t-1)})^2}
+\end{equation}
+For a given tree structure, the optimal weight $w_j^*$ for leaf $j$ containing sample set $I_j$ is given by:
+\begin{equation}
+w_j^* = -\frac{\sum_{i \in I_j} g_i}{\sum_{i \in I_j} h_i + \lambda}
+\end{equation}
+The corresponding split gain evaluated at each candidate node is:
+\begin{equation}
+\mathcal{G}_{\text{split}} = \frac{1}{2} \left[ \frac{\left(\sum_{i \in I_L} g_i\right)^2}{\sum_{i \in I_L} h_i + \lambda} + \frac{\left(\sum_{i \in I_R} g_i\right)^2}{\sum_{i \in I_R} h_i + \lambda} - \frac{\left(\sum_{i \in I} g_i\right)^2}{\sum_{i \in I} h_i + \lambda} \right] - \gamma
+\end{equation}
+
+\subsection{Elastic Net Regularized Logistic Regression}
+
+To establish an interpretable linear baseline that accommodates highly correlated financial ratios, we formulate an Elastic Net Logistic Regression model:
+\begin{equation}
+P(Y_{i,t+4} = 1 \mid X_{i,t}) = \frac{1}{1 + \exp\left(-\left(\beta_0 + \boldsymbol{\beta}^T X_{i,t}\right)\right)}
+\end{equation}
+The objective function balances $L_1$ (Lasso) sparsity and $L_2$ (Ridge) grouping effects:
+\begin{equation}
+\min_{(\beta_0, \boldsymbol{\beta})} \left\{ -\frac{1}{N} \sum_{i=1}^N \left[ y_i \log p_i + (1 - y_i) \log(1 - p_i) \right] + \lambda \left( \alpha \|\boldsymbol{\beta}\|_1 + \frac{1 - \alpha}{2} \|\boldsymbol{\beta}\|_2^2 \right) \right\}
+\end{equation}
+where $\alpha \in [0, 1]$ dictates the compromise between feature selection ($\alpha = 1$) and collinearity handling ($\alpha = 0$).
+
+\subsection{Class Imbalance Loss Modification}
+
+To adjust for the low base rate of bank failures, models are trained using a weighted loss formulation:
+\begin{equation}
+l(y_i, \hat{p}_i) = - w \cdot y_i \log(\hat{p}_i) - (1 - y_i) \log(1 - \hat{p}_i), \quad \text{where } w = \frac{N_{\text{survived}}}{N_{\text{failed}}}
+\end{equation}
+
+\section{Proposed Evaluation and Validation Methodology}
+
+\begin{table}[t]
+\centering
+\caption{Target Metric Summary for Financial Failure Models}
+\label{tab:metrics}
+\vspace{2mm}
+\begin{tabular}{llp{7cm}}
+\toprule
+\textbf{Metric} & \textbf{Mathematical Definition} & \textbf{Analytical Relevance} \\
+\midrule
+PR-AUC & $\int_{0}^{1} P(R) \, dR$ & Robust to extreme class imbalance; evaluates precision across recall thresholds. \\
+ROC-AUC & $\int_{0}^{1} \text{TPR}(\text{FPR}) \, d\text{FPR}$ & Evaluates overall class separability. \\
+Brier Score & $\frac{1}{N} \sum_{i=1}^N (\hat{p}_i - y_i)^2$ & Measures probability calibration quality for risk scoring. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+To prevent lookahead bias in panel financial data:
+\begin{enumerate}
+    \item \textbf{Rolling Temporal Cross-Validation:} Train windows are defined strictly on past quarters $t \in [1, \tau]$, with evaluation conducted on future quarters $t \in [\tau+1, \tau+4]$.
+    \item \textbf{Winsorization and Scaling:} Extreme outliers (e.g., extreme \code{cre_concentration_pct}) are Winsorized at $1\%$ and $99\%$ quantiles computed strictly within training folds.
+\end{enumerate}
+
+\section{Summary and Next Steps}
+
+1. Implement feature preprocessing pipeline in R/Python including temporal split generators. \\
+2. Execute hyperparameter optimization for XGBoost ($\text{tree\_depth}$, $\text{learning\_rate}$, $\text{scale\_pos\_weight}$). \\
+3. Extract SHAP (SHapley Additive exPlanations) values to interpret non-linear balance sheet risk contributions.
+
+\end{document}
