@@ -1,0 +1,21 @@
+feature,auc,direction,separation,median_failed,median_survived,mean_failed,mean_survived,p01,p99,min,max
+total_risk_based_capital_ratio,0.046,Lower = riskier,0.908,6.662,14.227,6.961,17.705,3.04,63.75,-16.53,1309.36
+cre_concentration_pct,0.944,Higher = riskier,0.887,1031.975,214.469,2734.151,251.912,0,2957.53,0,829462.5
+noncurrent_rate_pct,0.94,Higher = riskier,0.881,12.059,1.12,13.363,2.02,0,24.57,0,100
+leverage_ratio,0.062,Lower = riskier,0.876,4.05,9.416,4.397,11.021,1.26,37.52,-11.41,313.52
+equity_to_assets_pct,0.073,Lower = riskier,0.853,4.388,9.962,4.827,11.38,1.55,34.56,0.01,98.94
+roa_annualized_pct,0.09,Lower = riskier,0.821,-4.668,0.782,-6.384,0.348,-16.76,3.13,-294.81,48.15
+allowance_to_loans_pct,0.889,Higher = riskier,0.779,3.487,1.312,3.803,1.576,0.33,7.09,0,100
+nii_to_assets_annualized_pct,0.154,Lower = riskier,0.692,2.279,3.545,2.308,3.584,0.72,5.98,-11.05,24.89
+past_due_30_89_to_assets_pct,0.825,Higher = riskier,0.649,2.541,0.658,3.051,0.971,0,6.63,0,17.44
+brokered_to_assets_pct,0.771,Higher = riskier,0.543,8.907,0,13.925,3.761,0,46.48,0,93.84
+securities_to_assets_pct,0.282,Lower = riskier,0.436,9.025,17.424,10.419,20.229,0,62.85,0,95.28
+county_unemp_rate,0.711,Higher = riskier,0.421,8.933,6.267,8.935,6.864,2.45,15.8,1.33,29.4
+fed_funds,0.33,Lower = riskier,0.341,0.183,0.507,0.648,1.897,0.12,5.26,0.12,5.26
+log_total_assets,0.653,Higher = riskier,0.305,12.451,11.814,12.59,11.973,9.49,16.36,7.71,21.23
+treasury_10y,0.352,Lower = riskier,0.297,3.46,3.663,3.382,3.717,2.74,4.85,2.74,4.85
+borrowed_to_assets_pct,0.604,Higher = riskier,0.207,5.044,2.166,6.005,4.346,0,25.42,0,79.25
+cash_to_assets_pct,0.594,Higher = riskier,0.188,6.193,3.72,7.771,6.046,0.6,33.07,0,95.85
+uninsured_deposit_pct,0.536,Higher = riskier,0.073,0,0,2.549,2.494,0,50.82,0,99.91
+county_disaster_past_4q,0.481,Lower = riskier,0.039,0,0,0.297,0.336,NA,NA,NA,NA
+loan_to_deposit_pct,0.509,Higher = riskier,0.019,80.39,80.888,81.457,2514.146,24.06,137.97,0,6759464.2
