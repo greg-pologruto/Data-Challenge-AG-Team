@@ -1,4 +1,4 @@
-\documentclass[11pt,a4paper]{article}
+\documentclass[10pt,a4paper]{article}
 
 \usepackage{microtype}
 \usepackage{xurl}
@@ -8,15 +8,18 @@
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
-\usepackage[margin=1in]{geometry}
+\usepackage[margin=0.72in]{geometry}
 \usepackage{enumitem}
+\setlist{nosep,leftmargin=*}
+\setlength{\parskip}{3pt}
+\setlength{\parindent}{0pt}
 
-% Math & Symbols
-\usepackage{amsmath, amssymb, amsfonts, bm}
-
-% Figures & Tables
+% Math & Figures
+\usepackage{amsmath, amssymb}
 \usepackage{graphicx}
-\graphicspath{{../graphs/}{graphs/}{./graphs/}}
+\usepackage{subcaption}
+\usepackage{float}
+\graphicspath{{../results/}}
 \usepackage{booktabs}
 \usepackage{tabularx}
 \usepackage{xcolor}
@@ -30,7 +33,7 @@
     urlcolor=blue
 }
 
-\title{\textbf{Predicting Bank Insolvency and Systemic Distress: Model Architecture, Mathematical Formulations, and Empirical Findings}}
+\title{\textbf{Machine Learning Models to Predict Bank Failure within Four Quarters}}
 \author{\textbf{Data Analytics Club - AG Team}}
 \date{\today}
 
@@ -39,122 +42,59 @@
 \maketitle
 
 \begin{quote}
-	\emph{RQ: Can quarterly financial ratios predict failures within four quarters, and do local economic conditions add predictive power beyond the bank's own financials?}
+\emph{RQ: Can quarterly financial ratios predict failures within four quarters, and do local economic conditions add predictive power beyond the bank's own financials?}
 \end{quote}
-\begin{itemize}[itemindent=4em]
-	\item Target: \code{fails_within_4q}
-	\item Feature groups compared: bank-only (capital, asset quality, funding, profitability), then added county unemployment and disasters, then added national rates
-	\item Why: failures were concentrated in 2009-2012; this timeline generates two distinct classes, starting our training data in 2007
-\end{itemize}
 
-\section{Introduction and Problem Formulation}
+\section{Prediction task and data design}
+The downsampled training file contains 13,508 bank-quarter rows from 2007--2010, with 1,228 positive failure labels and 12,280 negative labels. The model first fits on 2007--2009 and uses the downsampled data from 2010 as a later-period validation set.
 
-Predicting bank distress requires identifying early-warning signals in balance sheet ratios before insolvency occurs. We formalize this task as a binary classification problem on panel data of commercial banks over quarterly periods $t \in \{1, 2, \dots, T\}$.
 
-Let $X_{i,t} \in \mathbb{R}^d$ represent the vector of $d$ financial features for bank $i$ observed at quarter $t$. The target label $Y_{i,t+4} \in \{0, 1\}$ indicates whether bank $i$ fails or enters regulatory receivership within 4 quarters following quarter $t$:
-\begin{equation}
-Y_{i,t+4} = \begin{cases} 
-1 & \text{if bank } i \text{ fails within quarters } (t, t+4] \\
-0 & \text{if bank } i \text{ survives beyond quarter } t+4
-\end{cases}
-\end{equation}
+Failures are rare in the full data, known as a class imbalance. Training keeps all failure examples and downsamples nonfailures, making failures more visible to the learning model: they are 9.1\% of training rows, compared with 0.622\% of test rows. A negative label means no failure was observed during a complete four-quarter window; incomplete follow-up is not treated as negative, and assistance or merger events are not failures for this target. The script does not pass sample weights into our Machine Learning models' training loss. Instead, it adjusts the model's raw test probabilities using the negative-row weight, about 9.25:
+\[p_{i}=\frac{\hat{y}_i}{\hat{y}_i+(1-\hat{y}_i)\times 9.25}\]
+This corrects the probability shift expected from downsampling, assuming the sampled nonfailures represent the larger pool. It preserves the ranking of banks, but probability calibration can still differ across time periods.
 
-Because bank failures represent rare economic events, the dataset exhibits severe class imbalance ($\mathbb{P}(Y = 1) \ll 0.05$). The primary analytical objective is to maximize out-of-sample precision-recall curves while preserving interpretability for financial supervisory applications.
+\section{Inputs and banking meaning}
+The model uses 20 predictors. The \code{charter\_class} field becomes two indicators: \code{charter\_N} for a national commercial bank and \code{charter\_SM} for a state commercial Federal Reserve member. State nonmember banks (NM) are the reference category.
 
-\section{Exploratory Data Analysis and Key Findings}
+Bank ID, report date, year, quarter, split/sample-weight bookkeeping fields, and the outcome are not predictors. Federal funds and 10-year Treasury rates were excluded because they are shared by banks within each quarter and their test-period values fell below the training range.
 
-Initial visual inspection of the quarterly data yields critical insights regarding feature selection, extreme value distributions, and collinearity structures.
+Both county predictors describe the headquarters county, not all counties where a bank operates. Headquarters geography uses an annual June 30 office snapshot, which follows a first-quarter report date; county conditions also have publication lags. These features therefore need timing review before being interpreted as information available at each quarter's prediction date.
 
-\subsection{Univariate Distribution Analysis}
+\section{XGBoost Model}
+For each bank-quarter, the model estimates whether a qualifying bank failure will be observed in the next four calendar quarters. XGBoost builds shallow decision trees in sequence, with each tree adding a correction to the ensemble's earlier predictions. The sum of tree outputs is the model's raw score, which the binary-logistic objective converts to a failure probability:
+\[\hat{y}_i=\sum_{k=1}^{K} f_k(x_i)\]
 
-Analysis of univariate density distributions reveals distinct separation profiles between surviving institutions ($Y=0$) and failing institutions ($Y=1$):
+The model uses a learning rate of 0.05, maximum tree depth of 4, minimum child weight of 5, and 80\% row and feature sampling per tree to limit overfitting. It fits on downsampled 2007--2009 data and uses the downsampled 2010 rows for validation. Precision-Recall Area Under the Curve (PR-AUC) guides early stopping after 50 rounds without improvement; the best iteration is 41. The model is then refit on all downsampled 2007--2010 training rows with 41 trees. PR-AUC is useful for evaluating rankings when failures are rare, but it does not itself rebalance the data. Since the validation rows are downsampled, their precision-recall values do not represent the full population's failure prevalence. The separate probability adjustment for downsampling is described in the data-design section.
 
-\begin{enumerate}
-    \item \textbf{Capital Adequacy Metrics:} Metrics such as \code{total_risk_based_capital_ratio}, \code{leverage_ratio}, and \code{equity_to_assets_pct} exhibit strong left-tail shifts for failing institutions. While surviving institutions center around healthy risk-based capital ratios ($\ge 12\%$), failing institutions cluster below regulatory thresholds ($<6\%$).
-    \item \textbf{Asset Quality and Sector Concentration:} The distribution for \code{cre_concentration_pct} (Commercial Real Estate loans as a percentage of total capital) exhibits a long right tail among distressed banks, frequently exceeding $500\%$ to $1000\%$. Concurrently, \code{noncurrent_rate_pct} shows massive right-skewness for failing banks.
-    \item \textbf{Profitability Dynamics:} Annualized Return on Assets (\code{roa_annualized_pct}) for distressed institutions exhibits sharp negative density, reflecting severe earnings erosion prior to insolvency.
-\end{enumerate}
+\section{Test results and interpretation}
+On the 2011--2012 test set, ROC-AUC was 0.996 and PR-AUC was 0.558. The PR-AUC baseline from random ranking is the test failure rate, 0.0062. For the confusion matrix below, the model flags the riskiest 5\% of test bank-quarters. It flags 2,573 rows: 319 are positive failure labels and 2,254 are nonfailures. It misses 1 of the 320 failure labels.
 
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=0.5\textwidth]{04_densities_top_features.png}
-    \caption{An example image}
-    \label{fig:example}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth,height=0.36\textheight,keepaspectratio]{xgb_confusion_matrix.png}
+\caption{Confusion matrix for the riskiest 5\% of test bank-quarters.}
+\label{fig:confusion}
+\end{subfigure}
+\begin{subfigure}{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth,height=0.36\textheight,keepaspectratio]{xgb_feature_importance.png}
+\caption{Relative feature importance by gain.}
+\label{fig:feature-importance}
+\end{subfigure}
+\caption{XGBoost test outcomes and feature importance.}
+\label{fig:xgb-results}
 \end{figure}
 
 
-XGBoost constructs an additive ensemble of $K$ decision trees $\hat{y}_i = \sum_{k=1}^K f_k(x_i), \, f_k \in \mathcal{F}$. At step $t$, the objective function to minimize is:
-\begin{equation}
-\mathcal{O}^{(t)} = \sum_{i=1}^n l\left(y_i, \hat{y}_i^{(t-1)} + f_t(x_i)\right) + \Omega(f_t)
-\end{equation}
-where the regularization term $\Omega(f)$ penalizes model complexity:
-\begin{equation}
-\Omega(f_t) = \gamma T + \frac{1}{2} \lambda \sum_{j=1}^T w_j^2
-\end{equation}
-Here $T$ represents the number of leaves and $w_j$ denotes the leaf weights. Taking a second-order Taylor expansion of the loss function around $\hat{y}_i^{(t-1)}$ yields:
-\begin{equation}
-\mathcal{O}^{(t)} \approx \sum_{i=1}^n \left[ l(y_i, \hat{y}_i^{(t-1)}) + g_i f_t(x_i) + \frac{1}{2} h_i f_t^2(x_i) \right] + \gamma T + \frac{1}{2} \lambda \sum_{j=1}^T w_j^2
-\end{equation}
-where the first and second-order gradient statistics are defined as:
-\begin{equation}
-g_i = \frac{\partial l(y_i, \hat{y}^{(t-1)})}{\partial \hat{y}^{(t-1)}}, \quad h_i = \frac{\partial^2 l(y_i, \hat{y}^{(t-1)})}{\partial (\hat{y}^{(t-1)})^2}
-\end{equation}
-For a given tree structure, the optimal weight $w_j^*$ for leaf $j$ containing sample set $I_j$ is given by:
-\begin{equation}
-w_j^* = -\frac{\sum_{i \in I_j} g_i}{\sum_{i \in I_j} h_i + \lambda}
-\end{equation}
-The corresponding split gain evaluated at each candidate node is:
-\begin{equation}
-\mathcal{G}_{\text{split}} = \frac{1}{2} \left[ \frac{\left(\sum_{i \in I_L} g_i\right)^2}{\sum_{i \in I_L} h_i + \lambda} + \frac{\left(\sum_{i \in I_R} g_i\right)^2}{\sum_{i \in I_R} h_i + \lambda} - \frac{\left(\sum_{i \in I} g_i\right)^2}{\sum_{i \in I} h_i + \lambda} \right] - \gamma
-\end{equation}
 
-\subsection{Elastic Net Regularized Logistic Regression}
 
-To establish an interpretable linear baseline that accommodates highly correlated financial ratios, we formulate an Elastic Net Logistic Regression model:
-\begin{equation}
-P(Y_{i,t+4} = 1 \mid X_{i,t}) = \frac{1}{1 + \exp\left(-\left(\beta_0 + \boldsymbol{\beta}^T X_{i,t}\right)\right)}
-\end{equation}
-The objective function balances $L_1$ (Lasso) sparsity and $L_2$ (Ridge) grouping effects:
-\begin{equation}
-\min_{(\beta_0, \boldsymbol{\beta})} \left\{ -\frac{1}{N} \sum_{i=1}^N \left[ y_i \log p_i + (1 - y_i) \log(1 - p_i) \right] + \lambda \left( \alpha \|\boldsymbol{\beta}\|_1 + \frac{1 - \alpha}{2} \|\boldsymbol{\beta}\|_2^2 \right) \right\}
-\end{equation}
-where $\alpha \in [0, 1]$ dictates the compromise between feature selection ($\alpha = 1$) and collinearity handling ($\alpha = 0$).
 
-\subsection{Class Imbalance Loss Modification}
+At this cutoff, recall is 99.7\% (319 of 320 positive labels flagged) and precision is 12.4\% (319 of 2,573 flagged rows have a positive label). In practical terms, this threshold catches nearly all observed qualifying failure labels, but most alerts have no observed failure during the target window. The cutoff is a ranking-based review capacity, not a universal probability threshold. A deployment would need to select a threshold for its review capacity and validate it on data available at that time. Multiple positive bank-quarters can refer to the same bank or overlapping four-quarter windows, so these counts are not counts of unique bank failures.
 
-To adjust for the low base rate of bank failures, models are trained using a weighted loss formulation:
-\begin{equation}
-l(y_i, \hat{p}_i) = - w \cdot y_i \log(\hat{p}_i) - (1 - y_i) \log(1 - \hat{p}_i), \quad \text{where } w = \frac{N_{\text{survived}}}{N_{\text{failed}}}
-\end{equation}
-
-\section{Proposed Evaluation and Validation Methodology}
-
-\begin{table}[t]
-\centering
-\caption{Target Metric Summary for Financial Failure Models}
-\label{tab:metrics}
-\vspace{2mm}
-\begin{tabular}{llp{7cm}}
-\toprule
-\textbf{Metric} & \textbf{Mathematical Definition} & \textbf{Analytical Relevance} \\
-\midrule
-PR-AUC & $\int_{0}^{1} P(R) \, dR$ & Robust to extreme class imbalance; evaluates precision across recall thresholds. \\
-ROC-AUC & $\int_{0}^{1} \text{TPR}(\text{FPR}) \, d\text{FPR}$ & Evaluates overall class separability. \\
-Brier Score & $\frac{1}{N} \sum_{i=1}^N (\hat{p}_i - y_i)^2$ & Measures probability calibration quality for risk scoring. \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-To prevent lookahead bias in panel financial data:
-\begin{enumerate}
-    \item \textbf{Rolling Temporal Cross-Validation:} Train windows are defined strictly on past quarters $t \in [1, \tau]$, with evaluation conducted on future quarters $t \in [\tau+1, \tau+4]$.
-    \item \textbf{Winsorization and Scaling:} Extreme outliers (e.g., extreme \code{cre_concentration_pct}) are Winsorized at $1\%$ and $99\%$ quantiles computed strictly within training folds.
-\end{enumerate}
-
-\section{Summary and Next Steps}
-
-1. Implement feature preprocessing pipeline in R/Python including temporal split generators. \\
-2. Execute hyperparameter optimization for XGBoost ($\text{tree\_depth}$, $\text{learning\_rate}$, $\text{scale\_pos\_weight}$). \\
-3. Extract SHAP (SHapley Additive exPlanations) values to interpret non-linear balance sheet risk contributions.
+\section{Banking context and scope}
+Deposits are money a bank owes customers; equity is the cushion that absorbs losses. Credit problems, concentrated real estate lending, funding pressure, and weak earnings can reinforce one another before a bank fails. The model uses quarterly indicators of these risks and two county-level context measures. Its strong ranking results show separation in this historical test period, but do not establish that local conditions improve prediction: that requires comparing this model with a bank-financial-only version on the same temporal split. Feature importance shows how the fitted model used predictors, not causal effects.
 
 \end{document}
