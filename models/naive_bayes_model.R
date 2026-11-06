@@ -191,3 +191,13 @@ print(p_cm)
 
 #  7. Save metrics into csv -
 write_csv(metrics, "results/naive_bayes_metrics.csv")
+
+# commented out, this code saves the files as png, matches the format of the plots from xgboost
+
+# png("results/naive_bayes_feature_importance.png", width = 2100, height = 1800, res = 300, bg = "white")
+# print(p_imp)
+# dev.off()
+# 
+# png("results/naive_bayes_confusion_matrix.png", width = 2100, height = 1800, res = 300, bg = "white")
+# print(p_cm)
+# dev.off()
