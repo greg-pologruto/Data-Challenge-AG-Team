@@ -1,0 +1,2 @@
+model,test_rows,test_failures,failure_rate_pct,roc_auc,pr_auc,pr_auc_baseline,flagged_share,actual_flagged_share,recall_flagged,precision_flagged
+naive_bayes,51447,320,0.6219993391257023,0.9943120195786962,0.47939022632270917,0.0062199933912570225,0.05,0.05001263436157599,0.99375,0.12359113874854255
