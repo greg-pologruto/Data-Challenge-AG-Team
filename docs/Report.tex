@@ -1,4 +1,4 @@
-\documentclass[10pt,a4paper]{article}
+\documentclass[11pt,a4paper]{article}
 
 \usepackage{microtype}
 \usepackage{xurl}
@@ -8,7 +8,8 @@
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
-\usepackage[margin=0.72in]{geometry}
+
+\usepackage[left=1in,right=1in,top=0.2in,bottom=1in]{geometry}
 \usepackage{enumitem}
 \setlist{nosep,leftmargin=*}
 \setlength{\parskip}{3pt}
@@ -34,67 +35,63 @@
 }
 
 \title{\textbf{Machine Learning Models to Predict Bank Failure within Four Quarters}}
-\author{\textbf{Data Analytics Club - AG Team}}
-\date{\today}
+\author{\textbf{AG Team: Greg Pologruto and Andrew Golias}}
+\date{}
 
 \begin{document}
 
 \maketitle
 
-\begin{quote}
 \emph{RQ: Can quarterly financial ratios predict failures within four quarters, and do local economic conditions add predictive power beyond the bank's own financials?}
-\end{quote}
 
 \section{Prediction task and data design}
-The downsampled training file contains 13,508 bank-quarter rows from 2007--2010, with 1,228 positive failure labels and 12,280 negative labels. The model first fits on 2007--2009 and uses the downsampled data from 2010 as a later-period validation set.
+The analysis uses quarterly bank records from 2007--2012 and 20 predictors covering capital, loan quality, funding, earnings, bank size and charter, plus headquarters-county unemployment and disaster exposure. The training data cover 2007--2010 (13,508 downsampled bank-quarters: 1,228 failures and 12,280 nonfailures); the remaining test set covers 2011--2012 (51,447 bank-quarters, including 320 failures, or 0.622\%). The target is a qualifying failure observed in the following four calendar quarters. A nonfailure requires a complete follow-up window; assistance and mergers are not counted as failures.
 
 
-Failures are rare in the full data, known as a class imbalance. Training keeps all failure examples and downsamples nonfailures, making failures more visible to the learning model: they are 9.1\% of training rows, compared with 0.622\% of test rows. A negative label means no failure was observed during a complete four-quarter window; incomplete follow-up is not treated as negative, and assistance or merger events are not failures for this target. The script does not pass sample weights into our Machine Learning models' training loss. Instead, it adjusts the model's raw test probabilities using the negative-row weight, about 9.25:
+To address the rare outcome, training retains all failures and downsamples nonfailures to 9.1\% of the training rows. Predictions are adjusted for the roughly 9.25-to-1 sampling weight before test evaluation:
 \[p_{i}=\frac{\hat{y}_i}{\hat{y}_i+(1-\hat{y}_i)\times 9.25}\]
 This corrects the probability shift expected from downsampling, assuming the sampled nonfailures represent the larger pool. It preserves the ranking of banks, but probability calibration can still differ across time periods.
 
-\section{Inputs and banking meaning}
-The model uses 20 predictors. The \code{charter\_class} field becomes two indicators: \code{charter\_N} for a national commercial bank and \code{charter\_SM} for a state commercial Federal Reserve member. State nonmember banks (NM) are the reference category.
+\section{Significant Variables}
+The strongest signals are bank balance-sheet and credit-quality measures. Total risk-based capital ratio is the leading XGBoost feature by gain. In the data, its median is 6.7\% for failures versus 14.2\% for nonfailures; lower capital therefore marks greater risk. Leverage ratio and equity-to-assets show the same pattern (medians 4.1\% vs. 9.4\%, and 4.4\% vs. 10.0\%). These measures describe the bank’s capital cushion against losses.
 
-Bank ID, report date, year, quarter, split/sample-weight bookkeeping fields, and the outcome are not predictors. Federal funds and 10-year Treasury rates were excluded because they are shared by banks within each quarter and their test-period values fell below the training range.
 
-Both county predictors describe the headquarters county, not all counties where a bank operates. Headquarters geography uses an annual June 30 office snapshot, which follows a first-quarter report date; county conditions also have publication lags. These features therefore need timing review before being interpreted as information available at each quarter's prediction date.
+Credit stress also separates the groups. Failed banks have a median noncurrent-loan rate of 12.1\%, compared with 1.1\% for nonfailures, and a higher median past-due loans-to-assets ratio. Commercial real estate (CRE) concentration is higher among failures, as is the allowance for loan losses relative to loans. Weaker earnings accompany these risks: median annualized return on assets is -4.7\% for failures and 0.8\% for nonfailures. Together, these patterns are consistent with thinner capital, deteriorating loans, concentrated exposure, and losses preceding failure. They are associations, not causal effects.
+
+
+\section{Naive Bayes Model}
+Naive Bayes is fit on the same training data; its continuous inputs are capped at training-set 1st and 99th percentiles to reduce outlier influence. This model provides a simpler comparison model: it estimates failure risk from each predictor's distribution among failed and surviving banks, then combines those estimates. To limit the effect of extreme values, continuous predictors are capped at their training-set 1st and 99th percentiles. On the test set, it ranks failures nearly as well as XGBoost and identifies 318 of 320 failures in the riskiest 5\% of bank-quarters.
+
 
 \section{XGBoost Model}
-For each bank-quarter, the model estimates whether a qualifying bank failure will be observed in the next four calendar quarters. XGBoost builds shallow decision trees in sequence, with each tree adding a correction to the ensemble's earlier predictions. The sum of tree outputs is the model's raw score, which the binary-logistic objective converts to a failure probability:
+XGBoost is tuned using 2010 as a later-period validation set and refit on 2007--2010. For each bank-quarter, the model estimates whether a qualifying bank failure will be observed in the next four calendar quarters. XGBoost builds shallow decision trees in sequence, with each tree adding a correction to the ensemble's earlier predictions. The sum of tree outputs is the model's raw score, which the binary-logistic objective converts to a failure probability:
 \[\hat{y}_i=\sum_{k=1}^{K} f_k(x_i)\]
 
-The model uses a learning rate of 0.05, maximum tree depth of 4, minimum child weight of 5, and 80\% row and feature sampling per tree to limit overfitting. It fits on downsampled 2007--2009 data and uses the downsampled 2010 rows for validation. Precision-Recall Area Under the Curve (PR-AUC) guides early stopping after 50 rounds without improvement; the best iteration is 41. The model is then refit on all downsampled 2007--2010 training rows with 41 trees. PR-AUC is useful for evaluating rankings when failures are rare, but it does not itself rebalance the data. Since the validation rows are downsampled, their precision-recall values do not represent the full population's failure prevalence. The separate probability adjustment for downsampling is described in the data-design section.
 
 \section{Test results and interpretation}
-On the 2011--2012 test set, ROC-AUC was 0.996 and PR-AUC was 0.558. The PR-AUC baseline from random ranking is the test failure rate, 0.0062. For the confusion matrix below, the model flags the riskiest 5\% of test bank-quarters. It flags 2,573 rows: 319 are positive failure labels and 2,254 are nonfailures. It misses 1 of the 320 failure labels.
-
+Both models are evaluated on the same untouched 2011--2012 set using ROC-AUC, PR-AUC, and the share of failures found when evaluating reporting from bank quarters. They separate failures well in this historical test period: XGBoost ROC-AUC is 0.996 and PR-AUC is 0.558; Naive Bayes scores 0.994 and 0.479. The random-ranking PR-AUC baseline is 0.0062, the test failure rate. When each flags the riskiest 5\% of rows, XGBoost identifies 319 of 320 failures and Naive Bayes 318; precision is about 12.4\% for each. Thus, XGBoost leads on ranking metrics, but their high-recall screening results are very similar.
 
 \begin{figure}[H]
 \centering
-\begin{subfigure}{0.49\textwidth}
+
+\begin{subfigure}{0.39\textwidth}
 \centering
-\includegraphics[width=\linewidth,height=0.36\textheight,keepaspectratio]{xgb_confusion_matrix.png}
-\caption{Confusion matrix for the riskiest 5\% of test bank-quarters.}
-\label{fig:confusion}
+\includegraphics[width=\linewidth,height=0.28\textheight,keepaspectratio]{xgb_confusion_matrix.png}
+\caption{XGBoost Confusion Matrix.}
 \end{subfigure}
-\begin{subfigure}{0.49\textwidth}
+\begin{subfigure}{0.39\textwidth}
 \centering
-\includegraphics[width=\linewidth,height=0.36\textheight,keepaspectratio]{xgb_feature_importance.png}
-\caption{Relative feature importance by gain.}
-\label{fig:feature-importance}
+\includegraphics[width=\linewidth,height=0.28\textheight,keepaspectratio]{naive_bayes_confusion_matrix.png}
+\caption{Naive Bayes Confusion Matrix.}
 \end{subfigure}
-\caption{XGBoost test outcomes and feature importance.}
-\label{fig:xgb-results}
+\caption{XGBoost vs Naive Bayes model comparison test outcomes.}
 \end{figure}
 
 
+This comparison suggests that model choice alone does not determine useful performance. Both methods benefit from defining the outcome carefully, using a time-based split, limiting extreme values where needed, and making failures visible during training through downsampling. Those data-preparation decisions are central to the strong results; this comparison does not isolate their individual effects, so a controlled evaluation would be needed to measure how much each contributes.
 
 
-
-At this cutoff, recall is 99.7\% (319 of 320 positive labels flagged) and precision is 12.4\% (319 of 2,573 flagged rows have a positive label). In practical terms, this threshold catches nearly all observed qualifying failure labels, but most alerts have no observed failure during the target window. The cutoff is a ranking-based review capacity, not a universal probability threshold. A deployment would need to select a threshold for its review capacity and validate it on data available at that time. Multiple positive bank-quarters can refer to the same bank or overlapping four-quarter windows, so these counts are not counts of unique bank failures.
-
-\section{Banking context and scope}
-Deposits are money a bank owes customers; equity is the cushion that absorbs losses. Credit problems, concentrated real estate lending, funding pressure, and weak earnings can reinforce one another before a bank fails. The model uses quarterly indicators of these risks and two county-level context measures. Its strong ranking results show separation in this historical test period, but do not establish that local conditions improve prediction: that requires comparing this model with a bank-financial-only version on the same temporal split. Feature importance shows how the fitted model used predictors, not causal effects.
+\section{Limitations}
+Only a single historical test period is evaluated by either model, so performance does not necessarily carry over to current banks or different economic conditions. Downsampling assumes sampled nonfailures represent the full population; however, probabilities may not hold constant over time. County measures describe headquarters locations and may have a timing delay, impacting the local economic portion of our research.
 
 \end{document}
